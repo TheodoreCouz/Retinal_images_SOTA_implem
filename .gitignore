@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv*/
+*.egg-info/
+
+# datasets, weights, run outputs
+data/
+ckpt/
+checkpoints/
+results/
+output*/
+logs/
+*.pth
+*.pt
+*.npz
+
+.DS_Store
+.idea/
+.vscode/
