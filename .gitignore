@@ -1,16 +1,25 @@
 __pycache__/
 *.py[cod]
-.venv/
-venv*/
 *.egg-info/
+
+# virtualenvs (./venv is a symlink to /globalsc, see setup_venvs.sh)
+.venv/
+venv
+venv*/
 
 # datasets, weights, run outputs
 data/
+# ...but timm/data is Pytorch-RIADD's vendored source package, not a dataset.
+# The unqualified data/ rule above silently excluded it from the initial
+# commit, which left every train_*.py in that method unimportable.
+!Pytorch-RIADD/timm/data/
 ckpt/
 checkpoints/
 results/
 output*/
 logs/
+preweights
+preweights/
 *.pth
 *.pt
 *.npz

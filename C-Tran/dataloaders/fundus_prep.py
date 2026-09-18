@@ -17,9 +17,12 @@ Datasets:
 import os
 import pandas as pd
 
-MURED_DIR = "/storage2/cousin/datasets/MURED"
-RFMID_DIR = "/storage2/cousin/datasets/RFMiD"
-PRISM_DIR = "/home/cousin/research/Fiber_dino/PRISM v1"
+# Dataset roots. Overridable per-site with the MURED_DIR / RFMID_DIR / PRISM_DIR
+# environment variables, so the same code runs against a different data mount
+# without editing the file.
+MURED_DIR = os.environ.get("MURED_DIR", "/storage2/cousin/datasets/MURED")
+RFMID_DIR = os.environ.get("RFMID_DIR", "/storage2/cousin/datasets/RFMiD")
+PRISM_DIR = os.environ.get("PRISM_DIR", "/home/cousin/research/Fiber_dino/PRISM v1")
 
 RFMID_CLASSES = ("Disease_Risk,DR,ARMD,MH,DN,MYA,BRVO,TSLN,ERM,LS,MS,CSR,ODC,"
                  "CRVO,TV,AH,ODP,ODE,ST,AION,PT,RT,RS,CRS,EDN,RPEC,MHL,RP,"

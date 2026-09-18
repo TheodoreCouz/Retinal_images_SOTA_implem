@@ -41,7 +41,8 @@ from timm.utils import ApexScaler, NativeScaler
 from timm.utils import ApexScaler,get_score
 from timm.utils import Visualizer
 from timm.data import get_riadd_train_transforms,get_riadd_valid_transforms
-from timm.data import RiaddDataSet
+from timm.data import RiaddDataSet, RiaddDataSet9Classes, RiaddDataSet8Classes, \
+    RiaddDataSet11Classes
 
 import torch.distributed as dist
 try:
@@ -258,6 +259,27 @@ parser.add_argument('--eval-metric', default='top1', type=str, metavar='EVAL_MET
 parser.add_argument('--tta', type=int, default=0, metavar='N',
                     help='Test/inference time augmentation (oversampling) factor. 0=None (default: 0)')
 parser.add_argument("--local_rank", default=0, type=int)
+# KAMATALAB's "multi-stage" strategy (paper Appendix A.1): sub-challenge 2 is
+# split into three sub-tasks of comparable training-set size instead of being
+# learned as one 28-way head, so the rare classes are not swamped. The class
+# groupings live in the vendored timm datasets and match this label order
+# exactly (measured positives: g9 65-376, g8 22-58, g11 5-17).
+#   full -> 29 classes, one head (the direct-training strategy)
+#   dr   -> 1 class, Disease_Risk only (sub-challenge 1)
+#   g9 / g8 / g11 -> the three sub-challenge-2 sub-tasks
+SUBTASKS = {
+    'full': (RiaddDataSet, 29, False),
+    # onlydisease=True emits TWO targets: Disease_Risk, plus a derived flag for
+    # 'any sub-challenge-2 disease present'. That second output is the coupling
+    # the paper describes between the two sub-challenges. Column 0 is the one
+    # that goes into the blend.
+    'dr':   (RiaddDataSet, 2, True),
+    'g9':   (RiaddDataSet9Classes, 9, False),
+    'g8':   (RiaddDataSet8Classes, 8, False),
+    'g11':  (RiaddDataSet11Classes, 11, False),
+}
+parser.add_argument('--subtask', default='full', choices=list(SUBTASKS),
+                    help='class subset to train (multi-stage strategy; default: full)')
 parser.add_argument('--start-fold', type=int, default=0, metavar='N',
                     help='skip folds before this index, e.g. to resume a partial KFold run (default: 0)')
 parser.add_argument('--use-multi-epochs-loader', action='store_true', default=False,
@@ -283,6 +305,10 @@ def _parse_args():
     # The main arg parser parses the rest of the args, the usual
     # defaults will have been overridden if config file specified.
     args = parser.parse_args(remaining)
+
+    # The head width is a property of the sub-task, not something the caller
+    # should have to keep in sync with --subtask.
+    args.num_classes = SUBTASKS[args.subtask][1]
 
     # Cache the args as a text string to save them in the output dir later
     args_text = yaml.safe_dump(args.__dict__, default_flow_style=False)
@@ -473,11 +499,16 @@ def main(fold_i = 0, data_ = None, train_index = None, val_index = None):
         _logger.info('Scheduled epochs: {}'.format(20))
 
     ##create DataLoader
+    ds_cls, _, only_disease = SUBTASKS[args.subtask]
     train_data = data_.iloc[train_index, :].reset_index(drop=True)
-    dataset_train = RiaddDataSet(image_ids = train_data,baseImgPath = args.data)
+    dataset_train = RiaddDataSet(image_ids = train_data,baseImgPath = args.data) \
+        if ds_cls is RiaddDataSet and not only_disease else \
+        ds_cls(image_ids = train_data, baseImgPath = args.data, onlydisease = only_disease)
 
-    val_data = data_.iloc[val_index, :].reset_index(drop=True) 
-    dataset_eval = RiaddDataSet(image_ids = val_data,baseImgPath = args.data)
+    val_data = data_.iloc[val_index, :].reset_index(drop=True)
+    dataset_eval = RiaddDataSet(image_ids = val_data,baseImgPath = args.data) \
+        if ds_cls is RiaddDataSet and not only_disease else \
+        ds_cls(image_ids = val_data, baseImgPath = args.data, onlydisease = only_disease)
                 
 
     # setup mixup / cutmix
@@ -826,7 +857,9 @@ if __name__ == '__main__':
     setup_default_logging()
     args, args_text = _parse_args()
     folds = KFold(n_splits=5, shuffle=True, random_state=args.seed)
-    data_ = pd.read_csv('/storage2/cousin/datasets/RFMiD/train_labels.csv')
+    data_ = pd.read_csv(os.environ.get(
+        'RIADD_TRAIN_CSV',
+        '/storage2/cousin/datasets/RFMiD/train_labels.csv'))
     for fold_i, (train_index, val_index) in enumerate(folds.split(data_)):
         if fold_i < args.start_fold:
             continue
