@@ -5,7 +5,7 @@ correlation needs every member on its own. One deterministic pass per model
 (get_riadd_valid_transforms) — the stochastic TTA would only add noise to a
 correlation estimate.
 
-  riadd23_members_{mured,rfmid}_test_seed<N>.npz
+  riadd23_members_{mured,rfmid}_{val,test}_seed<N>.npz
       probs   (10, N, C) float32  members ordered p2 fold0..4, p3 fold0..4
       targets (N, C) int64
       members list of "p2/fold0" ... strings
@@ -27,12 +27,12 @@ import eval_ci
 RUNS, SRC, OUT = os.environ['RUNS_DIR'], os.environ['SRC_DIR'], os.environ['PROBS_DIR']
 PATHS = {'p2': ('tf_efficientnet_b5_ns', 960), 'p3': ('tf_efficientnet_b6_ns', 768)}
 DATASETS = {
-    'mured': dict(nc=20, ds=PrismDataSet, img_dir=f'{SRC}/MURED/images/images',
-                  csv=f'{SRC}/MURED/test_labels_stratified.csv',
-                  prefix=f'{RUNS}/riadd_paths_mured/{{p}}_seed'),
-    'rfmid': dict(nc=29, ds=RiaddDataSet, img_dir=f'{SRC}/RFMiD/Test',
-                  csv=f'{SRC}/RFMiD/testing_labels_29.csv',
-                  prefix=f'{RUNS}/riadd_paths/{{p}}_full_seed'),
+    'mured': dict(nc=20, ds=PrismDataSet, prefix=f'{RUNS}/riadd_paths_mured/{{p}}_seed',
+                  splits={'val': (f'{SRC}/MURED/images/images', f'{SRC}/MURED/val_labels_stratified.csv'),
+                          'test': (f'{SRC}/MURED/images/images', f'{SRC}/MURED/test_labels_stratified.csv')}),
+    'rfmid': dict(nc=29, ds=RiaddDataSet, prefix=f'{RUNS}/riadd_paths/{{p}}_full_seed',
+                  splits={'val': (f'{SRC}/RFMiD/Validation', f'{SRC}/RFMiD/validation_labels_29.csv'),
+                          'test': (f'{SRC}/RFMiD/Test', f'{SRC}/RFMiD/testing_labels_29.csv')}),
 }
 
 
@@ -44,10 +44,11 @@ def load_model(ckpt, arch, nc):
 
 
 for name, cfg in DATASETS.items():
-    df = pd.read_csv(cfg['csv'])
+  for split, (img_dir, csv) in cfg['splits'].items():
+    df = pd.read_csv(csv)
     y = df[df.columns[1:]].values.astype(np.int64)
     for seed in (42, 43, 44, 45, 46):
-        out = f'{OUT}/riadd23_members_{name}_test_seed{seed}.npz'
+        out = f'{OUT}/riadd23_members_{name}_{split}_seed{seed}.npz'
         if os.path.exists(out):
             continue
         probs, members = [], []
@@ -56,7 +57,7 @@ for name, cfg in DATASETS.items():
             if ckpts is None:
                 print(f'skip {name} {path} seed {seed}: incomplete', flush=True)
                 break
-            ds = cfg['ds'](image_ids=df, baseImgPath=cfg['img_dir'])
+            ds = cfg['ds'](image_ids=df, baseImgPath=img_dir)
             ds.transform = get_riadd_valid_transforms(SimpleNamespace(img_size=img))
             loader = DataLoader(ds, batch_size=8, shuffle=False, num_workers=6, pin_memory=True)
             for k, cp in enumerate(ckpts):

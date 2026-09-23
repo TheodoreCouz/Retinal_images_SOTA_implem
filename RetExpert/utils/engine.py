@@ -123,7 +123,14 @@ def train_one_epoch(model: torch.nn.Module,
             outputs, outputlist = model(samples)
 
             # --- Core Strategy: SOA (Stochastic One-hot Activation) ---
-            # Randomly select one intermediate block's output
+            # Matches the official repo exactly (OVS-AILab/RetExpert): samples
+            # over ALL blocks including the last, not {1,...,K-1} as Eq. 2-3 of
+            # the paper's prose describes. Confirmed by diffing against the
+            # official source -- the paper text and the authors' own code
+            # disagree here, and the code is what produced their reported
+            # numbers, so it's what we match. (An earlier version of this file
+            # "fixed" this to follow the paper equation instead; that was
+            # reverted after cloning the official repo showed it was wrong.)
             block_num = random.randint(0, len(outputlist) - 1)
             outputs_rb = outputlist[block_num]
 

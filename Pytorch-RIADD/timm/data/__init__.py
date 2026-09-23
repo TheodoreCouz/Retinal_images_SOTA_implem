@@ -10,6 +10,6 @@ from .parsers import create_parser
 from .real_labels import RealLabelsImagenet
 from .transforms import *
 from .transforms_factory import create_transform
-from .create_riadd_data import RiaddDataSet,RiaddDataSet11Classes,RiaddDataSet8Classes,RiaddDataSet9Classes,PrismDataSet
+from .create_riadd_data import RiaddDataSet,RiaddDataSet11Classes,RiaddDataSet8Classes,RiaddDataSet9Classes,PrismDataSet,PrismDataSetGroup,PrismDataSetNormal
 from .riadd_augment import get_riadd_train_transforms,get_riadd_valid_transforms,get_riadd_test_transforms
 from .riadd_augment import crop_maskImg

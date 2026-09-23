@@ -110,7 +110,17 @@ class RetExpertLoss(nn.Module):
         """
         Calculates Fundus Disease Co-occurrence Matrix (FDCM) loss.
         Equation (1): L_FDCM = Mean( (p_i - p_j)^2 - (1 - m_ij)^2 )
-        
+
+        NOTE: this does not match the paper's own Eq. 5 -- the paper's target
+        is (1-m_ij)^2 (squared) and sums an absolute residual over i<=j pairs
+        only, not the full C x C matrix via MSE. This file matches the
+        official repo (OVS-AILab/RetExpert) exactly, confirmed by diff -- the
+        code, not the paper prose, is what produced their reported numbers.
+        An earlier version of this file "fixed" this to follow the paper
+        equation instead; that was reverted after cloning the official repo
+        showed the paper and the authors' own code disagree here, and it's
+        the code we need to match for reproduction.
+
         Args:
             outputs: Model logits (Batch x Classes)
         """

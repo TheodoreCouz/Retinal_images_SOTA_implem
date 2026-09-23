@@ -1,8 +1,13 @@
 """Assemble KAMATALAB's three-path system and dump its blended probabilities.
 
-Per path, per seed: average the 5 fold models, each run TTA x3 through
-get_riadd_test_transforms, exactly as upstream subnmit_riadd.py does
-(CFG['tta']=3, equal fold weights).
+Per path, per seed: average the 5 fold models, each run TTA through
+get_riadd_test_transforms, equal fold weights. TTA count is PER-PATH, per the
+paper (Pachade et al. 2025, Medical Image Analysis, Appendix A.1): "Five times
+TTA for path one and three times TTA for path two and three." This was
+previously a single TTA=3 constant applied to all three paths -- wrong for
+path 1, confirmed against the paper text, not just against subnmit_riadd.py
+(whose vendored CFG['tta']=3 is for a single-path 4-fold submission variant,
+not the 3-path system's own per-path TTA schedule).
 
 Path one is multi-stage, so its 29 columns are stitched from four separately
 trained heads. The column indices are upstream's own (the iloc lists inside
@@ -28,7 +33,7 @@ from timm.data import get_riadd_test_transforms, RiaddDataSet
 
 RUNS, SRC, OUT = os.environ['RUNS_DIR'], os.environ['SRC_DIR'], os.environ['PROBS_DIR']
 SEEDS = (42, 43, 44, 45, 46)
-TTA = 3
+TTA = {'p1': 5, 'p2': 3, 'p3': 3}   # paper Appendix A.1: 5x for path 1, 3x for path 2/3
 BS = 8
 
 SPLITS = {
@@ -67,7 +72,7 @@ def head_probs(path, subtask, nc, seed, loader):
     out = []
     for cp in ckpts:
         m = load(cp, model_name, nc)
-        for _ in range(TTA):
+        for _ in range(TTA[path]):
             out.append(eval_ci.predict(m, loader))
         del m
         torch.cuda.empty_cache()

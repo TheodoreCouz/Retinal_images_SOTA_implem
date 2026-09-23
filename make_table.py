@@ -37,11 +37,34 @@ METHODS = [('RETExpert', 'retexpert'), ('RIADD (KAMATALAB)', 'riadd'), ('C-TRAN'
 COLS = [('macro F1', 'f1'), ('macro mAP', 'aupr'), ('Recall@n', 'recall@n')]
 
 
+def load_riadd(ds, s):
+    """KAMATALAB's actual multi-path reconstruction, not the single-model
+    stand-in `riadd_{ds}_seed{s}.npz` (dump_test_probs.py) this table used to
+    read -- that file predates the 3-path rebuild and isn't the paper's
+    method at all (one 5-fold B6 ensemble on the full 29/20-class label set,
+    no path 1 / path 2 / path 3 split).
+
+    RFMiD: mean of path1+path2+path3 (riadd3_blend_*, TTA=5/3/3 per path,
+    matching the paper's Appendix A.1). MuReD: mean of path2+path3 only --
+    path 1's sub-task heads are hardcoded to RFMiD's 29-column layout;
+    KAMATALAB never entered MuReD, so there's no path-1 split to reuse for
+    it, and dump_riadd23_mured.py accordingly only dumped p2/p3 there."""
+    if ds == 'rfmid':
+        z = np.load(f'{PROBS}/riadd3_blend_test_seed{s}.npz')
+        return z['probs'], z['targets']
+    p2 = np.load(f'{PROBS}/riadd23_mured_p2_test_seed{s}.npz')
+    p3 = np.load(f'{PROBS}/riadd23_mured_p3_test_seed{s}.npz')
+    return (p2['probs'] + p3['probs']) / 2, p2['targets']
+
+
 def per_seed(method, ds):
     rows = []
     for s in SEEDS:
-        z = np.load(f'{PROBS}/{method}_{ds}_seed{s}.npz')
-        p, t = z['test_pred'], z['test_true']
+        if method == 'riadd':
+            p, t = load_riadd(ds, s)
+        else:
+            z = np.load(f'{PROBS}/{method}_{ds}_seed{s}.npz')
+            p, t = z['test_pred'], z['test_true']
         m = compute_metrics(p, t, average='macro')
         m['recall@n'] = recall_at_n(p, t)
         rows.append(m)

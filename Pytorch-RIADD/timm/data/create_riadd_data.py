@@ -176,3 +176,59 @@ class PrismDataSet(data.Dataset):  # for training/testing
             img = img[:, :, ::-1]
             img = self.transform(image = img)['image']
         return img, label
+
+
+class PrismDataSetGroup(data.Dataset):
+    """PrismDataSet restricted to an explicit column-index group -- the MURED
+    analogue of RiaddDataSet9/8/11Classes, whose iloc lists are hardcoded to
+    RFMiD's 29-column layout and do not apply here. `cols` are iloc indices
+    into image_ids (1-based: index 0 is the id column), matching how the
+    RFMiD Classes variants index their own frequency tiers."""
+    def __init__(self, image_ids, cols, baseImgPath='', transform=None):
+        self.image_ids = image_ids
+        self.cols = list(cols)
+        self.baseImgPath = baseImgPath
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.image_ids)
+
+    def __getitem__(self, index):
+        imgId = str(self.image_ids.iloc[index, 0])
+        label = self.image_ids.iloc[index, self.cols].values.astype(np.int64)
+        imgpath = os.path.join(self.baseImgPath, imgId)
+        img = cv2.imread(imgpath)
+        img = crop_maskImg(img)
+        img = img[:, :, ::-1]
+        img = self.transform(image=img)['image']
+        return img, label
+
+
+class PrismDataSetNormal(data.Dataset):
+    """MURED analogue of RiaddDataSet(onlydisease=True) -- RFMiD's 'dr' head
+    predicts [Disease_Risk, any-of-the-other-columns], a 2-output redundant
+    pair. MURED has no Disease_Risk column; NORMAL (iloc 2, positive =
+    healthy) plays the equivalent role, so this predicts
+    [NORMAL, any-of-the-other-19-columns] the same structural way."""
+    NORMAL_COL = 2
+
+    def __init__(self, image_ids, baseImgPath='', transform=None):
+        self.image_ids = image_ids
+        self.baseImgPath = baseImgPath
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.image_ids)
+
+    def __getitem__(self, index):
+        imgId = str(self.image_ids.iloc[index, 0])
+        other_cols = [c for c in range(1, self.image_ids.shape[1]) if c != self.NORMAL_COL]
+        any_other = int(self.image_ids.iloc[index, other_cols].values.astype(np.int64).sum() > 0)
+        normal = int(self.image_ids.iloc[index, self.NORMAL_COL])
+        label = np.array([normal, any_other], dtype=np.int64)
+        imgpath = os.path.join(self.baseImgPath, imgId)
+        img = cv2.imread(imgpath)
+        img = crop_maskImg(img)
+        img = img[:, :, ::-1]
+        img = self.transform(image=img)['image']
+        return img, label

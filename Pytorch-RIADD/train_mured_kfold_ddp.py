@@ -42,6 +42,28 @@ from timm.utils import ApexScaler,get_score
 from timm.utils import Visualizer
 from timm.data import get_riadd_train_transforms,get_riadd_valid_transforms
 from timm.data import PrismDataSet as RiaddDataSet  # MURED uses PrismDataSet (filename incl. extension)
+from timm.data import PrismDataSetGroup, PrismDataSetNormal
+
+# MURED path-1 analogue of RFMiD's dr/g9/g8/g11 split: same frequency-ranked-
+# tier method as KAMATALAB's own RFMiD split (sort classes by training
+# occurrence, cut into fixed-size tiers), tier sizes apportioned to MURED's 19
+# non-NORMAL classes in the same 9:8:11 proportion RFMiD used (largest-
+# remainder rounding: 19*9/28=6.11, 19*8/28=5.43, 19*11/28=7.46 -> 6/5/8).
+# iloc indices (0 = id column), verified against actual train-split counts:
+#   normal (iloc 2)      NORMAL alone -- MURED's analogue of RFMiD's Disease_Risk
+#   g6 (top 6, 107-337)   DR, ODC, OTHER, MH, DN, ARMD    -> iloc [1,3,4,6,7,20]
+#   g5 (next 5, 41-106)   TSLN, MYA, BRVO, ODP, CNV        -> iloc [5,8,9,10,12]
+#   g8 (bottom 8, 20-40)  RS, ODE, CRVO, LS, CSR, HTR, ASR, CRS -> iloc [11,13,14,15,16,17,18,19]
+MURED_G6  = [1, 3, 4, 6, 7, 20]
+MURED_G5  = [5, 8, 9, 10, 12]
+MURED_G8  = [11, 13, 14, 15, 16, 17, 18, 19]
+MURED_SUBTASKS = {
+    'full':   (None, 20),
+    'normal': (PrismDataSetNormal, 2),
+    'g6':     (lambda ids, path, transform=None: PrismDataSetGroup(ids, MURED_G6, path, transform), 6),
+    'g5':     (lambda ids, path, transform=None: PrismDataSetGroup(ids, MURED_G5, path, transform), 5),
+    'g8':     (lambda ids, path, transform=None: PrismDataSetGroup(ids, MURED_G8, path, transform), 8),
+}
 
 import torch.distributed as dist
 try:
@@ -85,6 +107,8 @@ parser.add_argument('--no-resume-opt', action='store_true', default=False,
                     help='prevent resume of optimizer state when resuming model')
 parser.add_argument('--num-classes', type=int, default=20, metavar='N',
                     help='number of label classes (default: 1000)')
+parser.add_argument('--subtask', default='full', choices=list(MURED_SUBTASKS),
+                    help='full=20-class (path 2/3); normal/g6/g5/g8=path-1 sub-heads')
 parser.add_argument('--gp', default=None, type=str, metavar='POOL',
                     help='Global pool type, one of (fast, avg, max, avgmax, avgmaxc). Model default if None.')
 parser.add_argument('--img-size', type=int, default=768, metavar='N',
@@ -284,6 +308,10 @@ def _parse_args():
     # defaults will have been overridden if config file specified.
     args = parser.parse_args(remaining)
 
+    # The head width is a property of the sub-task, not something the caller
+    # should have to keep in sync with --subtask.
+    args.num_classes = MURED_SUBTASKS[args.subtask][1]
+
     # Cache the args as a text string to save them in the output dir later
     args_text = yaml.safe_dump(args.__dict__, default_flow_style=False)
     return args, args_text
@@ -473,11 +501,15 @@ def main(fold_i = 0, data_ = None, train_index = None, val_index = None):
         _logger.info('Scheduled epochs: {}'.format(20))
 
     ##create DataLoader
+    ds_cls, _ = MURED_SUBTASKS[args.subtask]
     train_data = data_.iloc[train_index, :].reset_index(drop=True)
-    dataset_train = RiaddDataSet(image_ids = train_data,baseImgPath = args.data)
-
-    val_data = data_.iloc[val_index, :].reset_index(drop=True) 
-    dataset_eval = RiaddDataSet(image_ids = val_data,baseImgPath = args.data)
+    val_data = data_.iloc[val_index, :].reset_index(drop=True)
+    if ds_cls is None:
+        dataset_train = RiaddDataSet(image_ids = train_data,baseImgPath = args.data)
+        dataset_eval = RiaddDataSet(image_ids = val_data,baseImgPath = args.data)
+    else:
+        dataset_train = ds_cls(train_data, args.data)
+        dataset_eval = ds_cls(val_data, args.data)
                 
 
     # setup mixup / cutmix

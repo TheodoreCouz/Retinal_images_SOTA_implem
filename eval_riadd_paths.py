@@ -16,6 +16,7 @@ from sklearn.metrics import average_precision_score, f1_score, roc_auc_score
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Pytorch-RIADD'))
 from metrics9 import tune_thresholds
+from postprocess_riadd import rank_vote, minmax_threshold, MINOR
 
 PROBS = os.environ['PROBS_DIR']
 SEEDS = (42, 43, 44, 45, 46)
@@ -29,14 +30,18 @@ def macro(fn, p, t):
                           if len(np.unique(t[:, c])) > 1]))
 
 
-def scores(p, t, thr):
+def scores(p, t, thr, pred=None):
+    """pred: optional pre-computed (N,29) binary array, overriding thr for F1s
+    (used by the rank-voting/min-max post-processing reconstructions, whose
+    decision isn't a flat per-class threshold)."""
+    if pred is None:
+        pred = (p >= thr[None, :]).astype(int)
     dr = roc_auc_score(t[:, 0], p[:, 0])
     md = 0.5 * (macro(roc_auc_score, p[:, 1:], t[:, 1:])
                 + macro(average_precision_score, p[:, 1:], t[:, 1:]))
-    sc2 = float(np.mean([f1_score(t[:, c].astype(int), (p[:, c] >= thr[c]).astype(int),
-                                  zero_division=0) for c in range(1, 29)]))
-    return {'DR AUC': dr, 'SC1 F1': f1_score(t[:, 0].astype(int),
-                                             (p[:, 0] >= thr[0]).astype(int), zero_division=0),
+    sc2 = float(np.mean([f1_score(t[:, c].astype(int), pred[:, c], zero_division=0)
+                         for c in range(1, 29)]))
+    return {'DR AUC': dr, 'SC1 F1': f1_score(t[:, 0].astype(int), pred[:, 0], zero_division=0),
             'MD Avg': md, 'SC2 F1': sc2, 'Final': 0.5 * (dr + md)}
 
 
@@ -47,11 +52,16 @@ def ci(v):
     return v.mean(), stats.t.ppf(.975, len(v) - 1) * v.std(ddof=1) / np.sqrt(len(v))
 
 
-for mode in ('0.5', 'tuned'):
-    print(f"\n=== threshold {mode}"
-          f"{'   (REPRODUCTION)' if mode == '0.5' else '   (ablation, not upstream)'} ===")
+MODES = ('0.5', 'tuned', 'postproc_rankvote', 'postproc_minmax')
+MODE_LABEL = {'0.5': 'REPRODUCTION', 'tuned': 'ablation, not upstream',
+              'postproc_rankvote': 'GUESSED reconstruction, not upstream -- see postprocess_riadd.py',
+              'postproc_minmax': 'GUESSED reconstruction, not upstream -- see postprocess_riadd.py'}
+
+for mode in MODES:
+    variants = VARIANTS if mode in ('0.5', 'tuned') else [('blend', 'BLEND of all three')]
+    print(f"\n=== threshold {mode}   ({MODE_LABEL[mode]}) ===")
     print(f"{'variant':28s}" + "".join(f"{k:>16s}" for k in KAMATA) + f"{'silent/28':>11s}")
-    for key, label in VARIANTS:
+    for key, label in variants:
         acc, sil = {k: [] for k in KAMATA}, []
         for s in SEEDS:
             f = f'{PROBS}/riadd3_{key}_test_seed{s}.npz'
@@ -59,14 +69,22 @@ for mode in ('0.5', 'tuned'):
                 continue
             te = np.load(f)
             p, t = te['probs'], te['targets']
+            va = np.load(f'{PROBS}/riadd3_{key}_val_seed{s}.npz')
+            pred = None
             if mode == '0.5':
                 thr = np.full(29, 0.5)
-            else:
-                va = np.load(f'{PROBS}/riadd3_{key}_val_seed{s}.npz')
+            elif mode == 'tuned':
                 thr = tune_thresholds(va['probs'], va['targets'])
-            for k, v in scores(p, t, thr).items():
+            elif mode == 'postproc_rankvote':
+                thr = np.full(29, 0.5)
+                pred = rank_vote(p, va['probs'], va['targets'])
+            elif mode == 'postproc_minmax':
+                thr = np.full(29, 0.5)
+                pred = minmax_threshold(p)
+            for k, v in scores(p, t, thr, pred=pred).items():
                 acc[k].append(v)
-            sil.append(sum(1 for c in range(1, 29) if (p[:, c] >= thr[c]).sum() == 0))
+            eff_pred = pred if pred is not None else (p >= thr[None, :]).astype(int)
+            sil.append(sum(1 for c in range(1, 29) if eff_pred[:, c].sum() == 0))
         if not sil:
             print(f"{label:28s}   (not available yet)")
             continue
